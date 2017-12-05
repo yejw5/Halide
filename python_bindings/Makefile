@@ -6,7 +6,7 @@ HALIDE_DIR ?= ..
 
 ifeq ($(UNAME), Linux)
 # Disable some warnings that are pervasive in Boost
-CCFLAGS=$(shell python3-config --cflags) -I $(HALIDE_DIR)/include -I $(ROOT_DIR) -std=c++11 -fPIC -Wno-unused-local-typedef -Wno-shorten-64-to-32
+CCFLAGS=$(shell python3-config --cflags) -I $(HALIDE_DIR)/include -std=c++11 -fPIC -Wno-unused-local-typedef -Wno-shorten-64-to-32
 PYTHON_VER=$(shell python3 --version | cut -d' ' -f2 | cut -b1,3)
 LDFLAGS=$(shell python3-config --ldflags) -lboost_python-py$(PYTHON_VER) -lz
 endif
@@ -22,28 +22,24 @@ MACPORTS_CCFLAGS =
 MACPORTS_LDFLAGS = 
 endif
 
-CCFLAGS=$(shell python3-config --cflags) -I $(HALIDE_DIR)/include -I $(ROOT_DIR) $(MACPORTS_CCFLAGS) -std=c++11 -Wno-unused-local-typedef -Wno-shorten-64-to-32
-LDFLAGS=$(shell python3-config --ldflags) $(MACPORTS_LDFLAGS) -lboost_python3-mt -lz
+# Note that if you are using Homebrew, be sure to do "brew install boost-python --with-python3";
+# without the latter flag, you'll get python2-only, producing fun link errors.
+CCFLAGS=$(shell python3-config --cflags) -I $(HALIDE_DIR)/include $(MACPORTS_CCFLAGS) -std=c++11 -Wno-unused-local-typedef -Wno-shorten-64-to-32
+LDFLAGS=$(shell python3-config --ldflags) $(MACPORTS_LDFLAGS) -lboost_python3-mt -lboost_numpy3-mt -lz
 endif
 
 NUMPY_PATH=$(shell python3 -c "import numpy; print(numpy.__path__[0] + '/core/include')")
 
 PY_SRCS=$(shell ls $(ROOT_DIR)/python/*.cpp)
 PY_OBJS=$(PY_SRCS:$(ROOT_DIR)/python/%.cpp=build/py_%.o)
-NUMPY_SRCS=$(shell ls $(ROOT_DIR)/halide_numpy/*.cpp)
-NUMPY_OBJS=$(NUMPY_SRCS:$(ROOT_DIR)/halide_numpy/%.cpp=build/numpy_%.o)
 
 build/py_%.o: $(ROOT_DIR)/python/%.cpp
 	mkdir -p build
 	$(CXX) $(CCFLAGS) -c $< -o $@
 
-build/numpy_%.o: $(ROOT_DIR)/halide_numpy/%.cpp
+build/halide.so: $(PY_SRCS) $(PY_OBJS)
 	mkdir -p build
-	$(CXX) $(CCFLAGS) -I $(NUMPY_PATH) -c $< -o $@
-
-build/halide.so: $(PY_SRCS) $(PY_OBJS) $(NUMPY_SRCS) $(NUMPY_OBJS)
-	mkdir -p build
-	$(CXX) $(PY_OBJS) $(NUMPY_OBJS) $(LDFLAGS) $(HALIDE_DIR)/lib/libHalide.a -shared -o $@
+	$(CXX) $(PY_OBJS) $(LDFLAGS) $(HALIDE_DIR)/lib/libHalide.a -shared -o $@
 
 clean:
 	rm -rf build

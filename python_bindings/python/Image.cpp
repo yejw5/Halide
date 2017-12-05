@@ -4,15 +4,7 @@
 
 #include "Image.h"
 
-#define USE_NUMPY
-
-#ifdef USE_NUMPY
-#ifdef USE_BOOST_NUMPY
-#include <boost/numpy.hpp>
-#else
-#include "halide_numpy/numpy.hpp"
-#endif
-#endif  // USE_NUMPY
+#include <boost/python/numpy.hpp>
 
 #include <boost/cstdint.hpp>
 #include <boost/functional/hash/hash.hpp>
@@ -29,13 +21,7 @@
 namespace h = Halide;
 namespace p = boost::python;
 
-#ifdef USE_NUMPY
-#ifdef USE_BOOST_NUMPY
-namespace bn = boost::numpy;
-#else
-namespace bn = Halide::numpy;
-#endif
-#endif  // USE_NUMPY
+namespace bn = boost::python::numpy;
 
 template <typename Ret, typename T, typename... Args>
 Ret buffer_call_operator(h::Buffer<T> &that, Args... args) {
@@ -481,8 +467,6 @@ h::Buffer<> python_object_to_buffer(p::object obj) {
     return h::Buffer<>();
 }
 
-#ifdef USE_NUMPY
-
 bn::dtype type_to_dtype(const h::Type &t) {
     if (t == h::UInt(8)) return bn::dtype::get_builtin<uint8_t>();
     if (t == h::UInt(16)) return bn::dtype::get_builtin<uint16_t>();
@@ -549,8 +533,6 @@ bn::ndarray buffer_to_ndarray(p::object buffer_object) {
         stride,
         buffer_object);
 }
-
-#endif
 
 struct BufferFactory {
 
@@ -649,7 +631,6 @@ void defineBuffer() {
            p::with_custodian_and_ward_postcall<0, 2>(),  // the buffer_t reference count is increased
            "Wrap a halide_buffer_t in an Buffer object, so that we can access its pixels.");
 
-#ifdef USE_NUMPY
     bn::initialize();
 
     p::def("ndarray_to_buffer", &ndarray_to_buffer,
@@ -672,7 +653,6 @@ void defineBuffer() {
            "Creates a numpy array from a Halide::Buffer."
            "Will take into account the Buffer size, dimensions, and type."
            "Created ndarray refers to the Buffer data (no copy).");
-#endif
 
     return;
 }

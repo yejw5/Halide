@@ -26,47 +26,18 @@ else()
     find_package(Halide REQUIRED)
 endif()
 
-option(USE_BOOST_NUMPY "Use Boost.Numpy dependency instead of Halide.Numpy" OFF)
-
-
-if(USE_BOOST_NUMPY)
-add_definitions( -DUSE_BOOST_NUMPY )
-set(BoostNumpy_INCLUDE_DIRS "")
-set(BoostNumpy_LIBRARY_DIR "")
-set(BoostNumpy_LIBRARIES boost_numpy)
-else()
-#(NOT USE_BOOST_NUMPY) is true
-
-file(GLOB MicroNumpyCpp
-halide_numpy/*.cpp
-halide_numpy/*.hpp
-)
-
-add_library(halide_numpy STATIC ${MicroNumpyCpp})
-target_link_libraries(halide_numpy ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} ${NumPy_LIBRARIES})
-set_property(TARGET halide_numpy PROPERTY POSITION_INDEPENDENT_CODE TRUE)
-
-set(BoostNumpy_INCLUDE_DIRS ./halide_numpy)
-set(BoostNumpy_LIBRARY_DIR ./halide_numpy)
-set(BoostNumpy_LIBRARIES halide_numpy)
-endif()
-
 add_definitions("-std=c++11")
 
 include_directories(
   ${HALIDE_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
-  ${BoostNumpy_INCLUDE_DIRS}
   ${PYTHON_INCLUDE_DIRS}
-  ${NUMPY_INCLUDE_DIRS}
 )
 
 link_directories(
   ../build/lib
   ${HALIDE_ROOT_DIR}/lib
   ${Boost_LIBRARY_DIRS}
-  ${BoostNumpy_LIBRARY_DIR}
-  ${Numpy_LIBRARY_DIR}
 )
 
 
@@ -85,8 +56,8 @@ add_library(halide SHARED ${SrcCpp})
 target_link_libraries(halide
   ${HALIDE_LIBRARIES}
   ${Boost_LIBRARIES}
-  ${BoostNumpy_LIBRARIES}
   ${PYTHON_LIBRARIES}
+  boost_numpy
 )
 
 set_target_properties( halide PROPERTIES PREFIX "")
