@@ -42,16 +42,39 @@ struct VarOrRVar {
     const bool is_rvar;
 };
 
+namespace Internal {
+struct Split;
+}
+
 /** A single definition of a Func. May be a pure or update definition. */
 class Stage {
     Internal::Definition definition;
+    std::string stage_name;
+    std::vector<Var> dim_vars; // Pure Vars of the Function (from the init definition)
+
     void set_dim_type(VarOrRVar var, Internal::ForType t);
     void set_dim_device_api(VarOrRVar var, DeviceAPI device_api);
-    void split(const std::string &old, const std::string &outer, const std::string &inner, Expr factor, bool exact, TailStrategy tail);
-    std::string stage_name;
+    void split(const std::string &old, const std::string &outer, const std::string &inner,
+               Expr factor, bool exact, TailStrategy tail);
+
+    void remove(const std::string &var);
+
 public:
-    Stage(Internal::Definition d, const std::string &n) : definition(d), stage_name(n) {
+    Stage(Internal::Definition d, const std::string &n, const std::vector<Var> &args)
+            : definition(d), stage_name(n), dim_vars(args) {
+        internal_assert(definition.args().size() == dim_vars.size());
         definition.schedule().touched() = true;
+    }
+
+    Stage(Internal::Definition d, const std::string &n, const std::vector<std::string> &args)
+            : definition(d), stage_name(n) {
+        definition.schedule().touched() = true;
+
+        std::vector<Var> dim_vars(args.size());
+        for (size_t i = 0; i < args.size(); i++) {
+            dim_vars[i] = Var(args[i]);
+        }
+        internal_assert(definition.args().size() == dim_vars.size());
     }
 
     /** Return the current Schedule associated with this Stage.  For
@@ -65,6 +88,13 @@ public:
 
     /** Return the name of this stage, e.g. "f.update(2)" */
     EXPORT const std::string &name() const;
+
+    /** Given a function's update definition with dimensions {rvars, vars},
+     * split the update into an itermediate Func with dimensions
+     * {rvars - preserved.first, preserved.second, vars} and a new update
+     * definition with dimensions {preserved.first, vars}.
+     * If called on a init/pure definition, this will throw an error. */
+    EXPORT Func rfactor(std::vector<std::pair<RVar, Var>> preserved);
 
     /** Scheduling calls that control how the domain of this stage is
      * traversed. See the documentation for Func for the meanings. */
@@ -100,6 +130,7 @@ public:
         return reorder(collected_args);
     }
 
+    EXPORT Stage &purify(VarOrRVar old_name, VarOrRVar new_name);
     EXPORT Stage &rename(VarOrRVar old_name, VarOrRVar new_name);
     EXPORT Stage specialize(Expr condition);
 
@@ -732,9 +763,9 @@ public:
      * functions that return a single value. */
     EXPORT Tuple update_values(int idx = 0) const;
 
-    /** Get the reduction domain for an update definition, if there is
+    /** Get the RVars of the reduction domain for an update definition, if there is
      * one. */
-    EXPORT RDom reduction_domain(int idx = 0) const;
+    EXPORT std::vector<RVar> rvars(int idx = 0) const;
 
     /** Does this function have at least one update definition? */
     EXPORT bool has_update_definition() const;
