@@ -249,6 +249,76 @@ struct FuncScheduleContents {
             }
         }
     }
+
+    std::vector<std::string> get_schedule_list() const {
+        std::vector<std::string> schedules;
+
+        // Declare compute and storage levels. Store/compute inline should
+        // be the default, so we don't have to do anything
+        if (compute_level.is_root()) {
+            schedules.push_back("compute_root()");
+        } else if (!compute_level.is_inlined()) {
+            std::ostringstream oss;
+            oss << "compute_at(" << compute_level.func() << ", " << compute_level.var().name() << ")";
+            schedules.push_back(oss.str());
+        }
+
+        if (store_level.is_root()) {
+            schedules.push_back("store_root()");
+        } else if (!store_level.is_inlined()) {
+            std::ostringstream oss;
+            oss << "store_at(" << compute_level.func() << ", " << compute_level.var().name() << ")";
+            schedules.push_back(oss.str());
+        }
+
+        if (memoized) {
+            schedules.push_back("memoize()");
+        }
+
+        std::ostringstream storage_order;
+        storage_order << "reorder_storage({";
+        for (size_t i = 0; i < storage_dims.size(); ++i) {
+            const StorageDim &s = storage_dims[i];
+            if (i > 0) {
+                storage_order << ", ";
+            }
+            storage_order << s.var;
+            if (s.alignment.defined()) {
+                std::ostringstream oss;
+                oss << "align_storage(" << s.var << ", " << s.alignment << ")";
+                schedules.push_back(oss.str());
+            }
+            if (s.fold_factor.defined()) {
+                std::ostringstream oss;
+                oss << "fold_storage(" << s.var << ", " << s.fold_factor << ", " << s.fold_forward << ")";
+                schedules.push_back(oss.str());
+            }
+        }
+        storage_order << "})";
+        schedules.push_back(storage_order.str());
+
+        for (const Bound &b : bounds) {
+            std::ostringstream oss;
+            if (!b.modulus.defined() && !b.remainder.defined()) {
+                oss << "bound(" << b.var << ", " << b.min << ", " << b.extent << ")";
+            } else {
+                internal_assert(!b.min.defined() && !b.extent.defined());
+                oss << "align_bounds(" << b.var << ", " << b.min << ", " << b.extent << ")";
+            }
+            schedules.push_back(oss.str());
+        }
+
+        for (const Bound &e : estimates) {
+            std::ostringstream oss;
+            internal_assert(!e.modulus.defined() && !e.remainder.defined());
+            oss << "estimate(" << e.var << ", " << e.min << ", " << e.extent << ")";
+            schedules.push_back(oss.str());
+        }
+
+        // TODO(psuriana): How do you handle wrappers?
+
+        return schedules;
+    }
 };
 
 template<>
@@ -299,6 +369,149 @@ struct StageScheduleContents {
                 p.offset = mutator->mutate(p.offset);
             }
         }
+    }
+
+    std::vector<std::string> get_schedule_list() const {
+        std::vector<std::string> schedules;
+
+        if (allow_race_conditions) {
+            schedules.push_back("allow_race_conditions()");
+        }
+
+        for (const Split &s : splits) {
+            std::ostringstream oss;
+            if (s.is_split()) {
+                oss << "split(" << s.old_var << ", " << s.outer << ", " << s.inner << ", " << s.factor;
+                switch (s.tail) {
+                    case TailStrategy::RoundUp:
+                        oss << ", TailStrategy::RoundUp)";
+                        break;
+                    case TailStrategy::GuardWithIf:
+                        oss << ", TailStrategy::GuardWithIf)";
+                        break;
+                    case TailStrategy::ShiftInwards:
+                        oss << ", TailStrategy::ShiftInwards)";
+                        break;
+                    case TailStrategy::Auto:
+                        oss << ")";
+                        break;
+                    default:
+                        internal_assert(false);
+                    }
+            } else if (s.is_fuse()) {
+                oss << "fuse(" << s.inner << ", " << s.outer << ", " << s.old_var << ")";
+            } else if (s.is_rename()) {
+                oss << "rename(" << s.old_var << ", " << s.outer << ")";
+            } else { // Purify
+                // TODO(psuriana): How do you re-generate rfactor?
+                user_assert(false) << "Cannot generate schedule resulting from rfactor";
+            }
+            schedules.push_back(oss.str());
+        }
+
+        for (const Dim &d : dims) {
+            std::ostringstream oss;
+            std::string sched;
+
+            // Mark device API
+            std::string device_api;
+            switch (d.device_api)  {
+                case DeviceAPI::None:
+                    device_api = "DeviceAPI::None";
+                    break;
+                case DeviceAPI::Host:
+                    device_api = "DeviceAPI::Host";
+                    break;
+                case DeviceAPI::Default_GPU:
+                    device_api = "DeviceAPI::Default_GPU";
+                    break;
+                case DeviceAPI::CUDA:
+                    device_api = "DeviceAPI::CUDA";
+                    break;
+                case DeviceAPI::OpenCL:
+                    device_api = "DeviceAPI::OpenCL";
+                    break;
+                case DeviceAPI::GLSL:
+                    device_api = "DeviceAPI::GLSL";
+                    break;
+                case DeviceAPI::OpenGLCompute:
+                    device_api = "DeviceAPI::OpenGLCompute";
+                    break;
+                case DeviceAPI::Metal:
+                    device_api = "DeviceAPI::Metal";
+                    break;
+                case DeviceAPI::Hexagon:
+                    device_api = "DeviceAPI::Hexagon";
+                    oss << "hexagon(" << d.var << ")";
+                    break;
+                default:
+                    internal_assert(false);
+            }
+            sched = oss.str();
+            if (!sched.empty()) {
+                schedules.push_back(sched);
+            }
+
+            // Mark for-loop type
+            oss.clear();
+            switch (d.for_type)  {
+                case ForType::Parallel:
+                    oss << "parallel(" << d.var << ")";
+                    break;
+                case ForType::Vectorized:
+                    oss << "vectorize(" << d.var << ")";
+                    break;
+                case ForType::Unrolled:
+                    oss << "unroll(" << d.var << ")";
+                    break;
+                case ForType::GPUBlock:
+                    oss << "gpu_blocks(" << d.var << ", " << device_api << ")";
+                    break;
+                case ForType::GPUThread:
+                    oss << "gpu_threads(" << d.var << ", " << device_api << ")";
+                    break;
+                default:
+                    break;
+            }
+            sched = oss.str();
+            if (!sched.empty()) {
+                schedules.push_back(sched);
+            }
+        }
+
+        for (const PrefetchDirective &p : prefetches) {
+            // TODO(psuriana): How should you refer to the Parameter or Func handle? and also the VarOrVar?
+            std::ostringstream oss;
+            oss << "prefetch(" << p.name << ", " << p.var << ", " << p.offset << ", ";
+            switch (p.strategy) {
+                case PrefetchBoundStrategy::Clamp:
+                    oss << "PrefetchBoundStrategy::Clamp";
+                    break;
+                case PrefetchBoundStrategy::GuardWithIf:
+                    oss << "PrefetchBoundStrategy::GuardWithIf";
+                    break;
+                case PrefetchBoundStrategy::NonFaulting:
+                    oss << "TailStrategy::NonFaulting";
+                    break;
+                default:
+                    internal_assert(false);
+            }
+            oss << ")";
+            schedules.push_back(oss.str());
+        }
+
+        // Is stage this computed with some other stage?
+        if (!fuse_level.level.is_inlined() && !fuse_level.level.is_root()) {
+            std::ostringstream oss;
+            oss << "compute_with(";
+
+            //Stage s, VarOrRVar var, const vector<pair<VarOrRVar, LoopAlignStrategy>> &align
+
+            oss << ")";
+            schedules.push_back(oss.str());
+        }
+
+        return schedules;
     }
 };
 
